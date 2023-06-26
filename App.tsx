@@ -9,14 +9,18 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showAdditionalFields, setShowAdditionalFields] = useState<boolean>(false);
   const [nomeList, setNomeList] = useState<string[]>([]);
-  
-  const db = SQLite.openDatabase({ name: 'mydb.db', createFromLocation: 1 });
 
   useEffect(() => {
+    initializeDatabase();
     fetchCervejaList();
   }, []);
 
-  const createTable = () => {
+  const initializeDatabase = async () => {
+    const db = await SQLite.openDatabase({ name: 'mydb.db', createFromLocation: 1 });
+    createTable(db);
+  };
+
+  const createTable = (db: SQLite.SQLiteDatabase) => {
     db.transaction((tx) => {
       tx.executeSql(
         'CREATE TABLE IF NOT EXISTS cervejas (id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT, name TEXT, style TEXT)',
@@ -27,41 +31,70 @@ const App: React.FC = () => {
     });
   };
 
-  const fetchCervejaList = () => {
-    db.transaction((tx) => {
-      tx.executeSql(
-        'SELECT name FROM cervejas',
-        [],
-        (_, resultSet) => {
-          const { rows } = resultSet;
-          const names = [];
-          for (let i = 0; i < rows.length; i++) {
-            names.push(rows.item(i).name);
-          }
-          setNomeList(names);
-        },
-        (_, error) => console.error('Erro ao buscar cervejas:', error)
-      );
-    });
-  };
-
-  const handleFetchData = async () => {
-    try {
-      const data = await fetchCervejaData();
-      setCervejaData(data);
-      setError(null);
-      db.transaction((tx) => {
-        tx.executeSql(
-          'INSERT INTO beers (brand, name, style) VALUES (?, ?, ?)',
-        [data.brand, data.name, data.style],
-          () => console.log('Dados inseridos com sucesso.'),
-          (_, error) => console.error('Erro ao inserir dados:', error)
-        );
+const fetchCervejaList = () => {
+  return new Promise<void>((resolve, reject) => {
+    SQLite.openDatabase({ name: 'mydb.db', createFromLocation: 1 })
+      .then((db) => {
+        db.transaction((tx) => {
+          tx.executeSql(
+            'SELECT name FROM cervejas',
+            [],
+            (_, resultSet) => {
+              const { rows } = resultSet;
+              const names = [];
+              for (let i = 0; i < rows.length; i++) {
+                names.push(rows.item(i).name);
+              }
+              setNomeList(names);
+              resolve();
+            },
+            (_, error) => {
+              console.error('Erro ao buscar cervejas:', error);
+              reject(error);
+            }
+          );
+        });
+      })
+      .catch((error) => {
+        console.error('Erro ao abrir o banco de dados:', error);
+        reject(error);
       });
-    } catch (error) {
-      setError('Erro ao buscar dados da API');
-    }
-  };
+  });
+};
+
+const handleFetchData = async () => {
+  try {
+    const data = await fetchCervejaData();
+    setCervejaData(data);
+    setError(null);
+
+    return new Promise<void>((resolve, reject) => {
+      SQLite.openDatabase({ name: 'mydb.db', createFromLocation: 1 })
+        .then((db) => {
+          db.transaction((tx) => {
+            tx.executeSql(
+              'INSERT INTO cervejas (brand, name, style) VALUES (?, ?, ?)',
+              [data.brand, data.name, data.style],
+              () => {
+                console.log('Dados inseridos com sucesso.');
+                fetchCervejaList().then(resolve).catch(reject);
+              },
+              (_, error) => {
+                console.error('Erro ao inserir dados:', error);
+                reject(error);
+              }
+            );
+          });
+        })
+        .catch((error) => {
+          console.error('Erro ao abrir o banco de dados:', error);
+          reject(error);
+        });
+    });
+  } catch (error) {
+    setError('Erro ao buscar dados da API');
+  }
+};
 
   return (
     <View style={styles.container}>
@@ -74,30 +107,26 @@ const App: React.FC = () => {
           <Text style={styles.text}>Style: {cervejaData.style}</Text>
         </>
       )}
-       {nomeList.length > 0 && (
-      <View style={styles.listContainer}>
-        <Text style={styles.listTitle}>Cervejas Guardadas:</Text>
-        {nomeList.map((name, index) => (
-          <TouchableOpacity
-            key={index}
-            onPress={() => setShowAdditionalFields(!showAdditionalFields)}
-            style={styles.listItemContainer}
-          >
-            <Text style={styles.listItem}>{name}</Text>
-            {showAdditionalFields && (
-              <View style={styles.additionalFieldsContainer}>
-                <Text style={styles.additionalField}>
-                  Brand: {cervejaData?.brand}
-                </Text>
-                <Text style={styles.additionalField}>
-                  Style: {cervejaData?.style}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        ))}
-      </View>
-    )}
+      {nomeList.length > 0 && (
+        <View style={styles.listContainer}>
+          <Text style={styles.listTitle}>Cervejas Guardadas:</Text>
+          {nomeList.map((name, index) => (
+            <TouchableOpacity
+              key={index}
+              onPress={() => setShowAdditionalFields(!showAdditionalFields)}
+              style={styles.listItemContainer}
+            >
+              <Text style={styles.listItem}>{name}</Text>
+              {showAdditionalFields && (
+                <View style={styles.additionalFieldsContainer}>
+                  <Text style={styles.additionalField}>Brand: {cervejaData?.brand}</Text>
+                  <Text style={styles.additionalField}>Style: {cervejaData?.style}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
     </View>
   );
 };
